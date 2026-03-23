@@ -65,6 +65,6 @@ spec:
   selector:
     app: hospital-app
   ports:
-  - port: 80
+  - port: 81
     targetPort: 5000
   type: NodePort
