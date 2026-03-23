@@ -34,19 +34,19 @@ spec:
         env:
           - name: MONGODB_URI
             valueFrom:
-            configMapKeyRef:
-              name: hms-configmap 
-              key: MONGODB_URI
+              configMapKeyRef:
+                name: hms-configmap 
+                key: MONGODB_URI
           - name: PORT
             valueFrom:
-            configMapKeyRef:
-              name: hms-configmap 
-              key: PORT
+              configMapKeyRef:
+                name: hms-configmap 
+                key: PORT
           - name: NODE_ENV
             valueFrom:
-            configMapKeyRef:
-              name: hms-configmap 
-              key: NODE_ENV   
+              configMapKeyRef:
+                name: hms-configmap 
+                key: NODE_ENV   
           - name: SESSION_SECRET
             value: "hospital-secret-2024"
           - name: JWT_SECRET
