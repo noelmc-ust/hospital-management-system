@@ -1,6 +1,7 @@
-# Use a slim Node image for a smaller footprint
 FROM node:18-slim
 
+# Add this to fix the 10 Debian vulnerabilities (gpgv, libc6, openssl, etc.)
+RUN apt-get update && apt-get upgrade -y && apt-get clean
 # Create app directory
 WORKDIR /app
 
