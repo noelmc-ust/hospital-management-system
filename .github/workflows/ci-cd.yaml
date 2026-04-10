@@ -17,15 +17,27 @@ jobs:
         with:
           fetch-depth: 0
       
-      # Step 1: Test and Monitor. This pushes to the dashboard AND fails the build if high issues exist.
-      - name: Snyk Check & Monitor
+      # Step 1: Security Gate - This will fail the pipeline if High/Critical vulns are found
+      - name: Snyk Security Gate
+        uses: snyk/actions/node@master
+        env: 
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }} 
+        with:
+          command: test
+          args: --severity-threshold=high --all-projects
+
+      # Step 2: Push to Dashboard - This uploads the report to the Snyk Web UI
+      # We only run this on 'push' to keep your dashboard history clean
+      - name: Snyk Monitor (Web UI)
+        if: github.event_name == 'push'
         uses: snyk/actions/node@master
         env: 
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }} 
         with:
           command: monitor
-          args: --severity-threshold=high --all-projects --project-name=hms-backend
+          args: --all-projects
 
+      # Step 3: Static Analysis
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2
         env:
@@ -35,6 +47,7 @@ jobs:
           args: >
             -Dsonar.sources=backend
 
+      # Step 4: Success Notification
       - name: Send Success Email
         if: success() && github.event_name == 'push' 
         uses: dawidd6/action-send-mail@v3
@@ -46,7 +59,6 @@ jobs:
           subject: "✅ Pipeline Success: ${{ github.repository }}"
           to: ${{ secrets.MAIL_USERNAME }}
           from: GitHub Actions CI
-          # Beautified Body
           body: |
             🚀 Pipeline Execution Successful!
             
@@ -57,10 +69,10 @@ jobs:
             - Branch: ${{ github.ref_name }}
             - Commit: ${{ github.sha }}
             - Author: ${{ github.actor }}
-            - Time: ${{ github.event.head_commit.timestamp }}
             --------------------------------------------------
             
-            ✅ Snyk Security Scan: Passed
+            ✅ Snyk Security Scan: Passed (No High-Severity Issues)
+            ✅ Snyk Dashboard: Updated
             ✅ SonarQube Analysis: Completed
             
             View full run logs here:
@@ -68,6 +80,7 @@ jobs:
             
             Keep up the great work!
 
+      # Step 5: Failure Notification
       - name: Send Failure Email
         if: failure() && github.event_name == 'push'
         uses: dawidd6/action-send-mail@v3
@@ -79,7 +92,6 @@ jobs:
           subject: "❌ Pipeline FAILED: ${{ github.repository }}"
           to: ${{ secrets.MAIL_USERNAME }}
           from: GitHub Actions CI
-          # Beautified Body
           body: |
             ⚠️ Attention: Pipeline Failure Detected
             
@@ -96,8 +108,3 @@ jobs:
             IMMEDIATE ACTION REQUIRED:
             Please review the logs at the link below to identify the failure:
             https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            
-            Check for:
-            1. New security vulnerabilities (Snyk)
-            2. Code quality gate failures (SonarQube)
-            3. Dependency installation errors
