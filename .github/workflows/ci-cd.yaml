@@ -8,8 +8,7 @@ on:
 
 jobs:
   ci:
-    name: Validate Code
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    name: Validate, Build & Push
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -17,8 +16,9 @@ jobs:
         with:
           fetch-depth: 0
       
-      # Step 1: Security Gate - This will fail the pipeline if High/Critical vulns are found
-      - name: Snyk Security Gate
+      # --- SECURITY & QUALITY PHASE ---
+
+      - name: Snyk SCA
         uses: snyk/actions/node@master
         env: 
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }} 
@@ -26,8 +26,6 @@ jobs:
           command: test
           args: --severity-threshold=high --all-projects
 
-      # Step 2: Push to Dashboard - This uploads the report to the Snyk Web UI
-      # We only run this on 'push' to keep your dashboard history clean
       - name: Snyk Monitor (Web UI)
         if: github.event_name == 'push'
         uses: snyk/actions/node@master
@@ -37,8 +35,8 @@ jobs:
           command: monitor
           args: --all-projects
 
-      # Step 3: Static Analysis
       - name: SonarQube Scan
+        id: sonarqube
         uses: SonarSource/sonarqube-scan-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -47,7 +45,47 @@ jobs:
           args: >
             -Dsonar.sources=backend
 
-      # Step 4: Success Notification
+      
+      - name: SonarQube Quality Gate Check
+        uses: SonarSource/sonarqube-quality-gate-action@v1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker Image locally
+        run: |
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/hms-backend:latest ./backend
+
+      - name: Trivy Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ secrets.DOCKERHUB_USERNAME }}/hms-backend:latest'
+          format: 'table'
+          exit-code: '1' # This will fail the pipeline if vulnerabilities are found
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Push Image to Docker Hub
+        if: github.event_name == 'push' && success()
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/hms-backend:latest
+
+      # --- NOTIFICATION PHASE ---
+
       - name: Send Success Email
         if: success() && github.event_name == 'push' 
         uses: dawidd6/action-send-mail@v3
@@ -56,31 +94,22 @@ jobs:
           server_port: 465
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "✅ Pipeline Success: ${{ github.repository }}"
+          subject: "✅ Deployment Ready: ${{ github.repository }}"
           to: ${{ secrets.MAIL_USERNAME }}
           from: GitHub Actions CI
           body: |
-            🚀 Pipeline Execution Successful!
-            
-            The CI/CD pipeline for ${{ github.repository }} has completed successfully.
+            🚀 Pipeline Success! Image is live on Docker Hub.
             
             --------------------------------------------------
-            DETAILS:
-            - Branch: ${{ github.ref_name }}
-            - Commit: ${{ github.sha }}
-            - Author: ${{ github.actor }}
+            REPORT CARD:
+            ✅ Snyk: High-severity check passed.
+            ✅ SonarQube: Quality Gate passed.
+            ✅ Trivy: Container image scan passed.
+            ✅ Docker Hub: Image pushed successfully.
             --------------------------------------------------
             
-            ✅ Snyk Security Scan: Passed (No High-Severity Issues)
-            ✅ Snyk Dashboard: Updated
-            ✅ SonarQube Analysis: Completed
-            
-            View full run logs here:
-            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            
-            Keep up the great work!
+            View Logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-      # Step 5: Failure Notification
       - name: Send Failure Email
         if: failure() && github.event_name == 'push'
         uses: dawidd6/action-send-mail@v3
@@ -93,18 +122,10 @@ jobs:
           to: ${{ secrets.MAIL_USERNAME }}
           from: GitHub Actions CI
           body: |
-            ⚠️ Attention: Pipeline Failure Detected
+            ⚠️ Attention: Pipeline Failure
             
-            The build for ${{ github.repository }} has failed during the validation stage. 
-            Automated deployments have been halted until the issues are resolved.
+            The build for ${{ github.repository }} failed. 
+            The Docker image was NOT pushed to the registry.
             
-            --------------------------------------------------
-            CRITICAL INFO:
-            - Failed Step: Validation/Security Scan
-            - Commit: ${{ github.sha }}
-            - Triggered by: ${{ github.actor }}
-            --------------------------------------------------
-            
-            IMMEDIATE ACTION REQUIRED:
-            Please review the logs at the link below to identify the failure:
+            Please check if the failure was in the Quality Gate or the Trivy Scan.
             https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
